@@ -7,9 +7,11 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-// blockTags emit a newline boundary in the plain-text output.
+// blockTags emit a newline boundary in the plain-text output. Table rows (tr)
+// and cells (td/th) are handled separately so that cells within a row are
+// space-separated rather than concatenated.
 var blockTags = map[atom.Atom]bool{
-	atom.P: true, atom.Div: true, atom.Tr: true, atom.Li: true,
+	atom.P: true, atom.Div: true, atom.Li: true,
 	atom.H1: true, atom.H2: true, atom.H3: true, atom.H4: true, atom.H5: true, atom.H6: true,
 	atom.Table: true, atom.Section: true, atom.Header: true, atom.Footer: true,
 	atom.Ul: true, atom.Ol: true, atom.Blockquote: true,
@@ -62,6 +64,8 @@ func htmlToText(input string) string {
 				if tt == html.StartTagToken {
 					links = append(links, linkFrame{href: href, pos: b.Len()})
 				}
+			case a == atom.Td || a == atom.Th:
+				b.WriteByte('\t') // separate adjacent cells; collapsed to a space later
 			case blockTags[a]:
 				b.WriteByte('\n')
 			}
@@ -82,6 +86,8 @@ func htmlToText(input string) string {
 						b.WriteString(" (" + lf.href + ")")
 					}
 				}
+			case a == atom.Tr:
+				b.WriteByte('\n')
 			case blockTags[a]:
 				b.WriteByte('\n')
 			}

@@ -132,6 +132,22 @@ func TestRenderAlignLeft(t *testing.T) {
 	}
 }
 
+func TestHTMLToTextTableCells(t *testing.T) {
+	html := `<table>` +
+		`<tr><td>Mobil</td><td>0176 6368 3213</td></tr>` +
+		`<tr><td>E-Mail</td><td>a@b.com</td></tr></table>`
+	got := htmlToText(html)
+	if !strings.Contains(got, "Mobil 0176 6368 3213") {
+		t.Errorf("adjacent cells concatenated, got: %q", got)
+	}
+	if !strings.Contains(got, "E-Mail a@b.com") {
+		t.Errorf("second row wrong: %q", got)
+	}
+	if strings.Contains(got, "Mobil 0176 6368 3213\n\nE-Mail") {
+		t.Errorf("rows should be single-spaced, got: %q", got)
+	}
+}
+
 func TestRenderNoFrame(t *testing.T) {
 	if _, err := Render(Input{Body: "x"}); err == nil {
 		t.Error("expected error with no frame")

@@ -120,3 +120,37 @@ func TestBuildGoMailMsg(t *testing.T) {
 		t.Error("expected error with no recipients")
 	}
 }
+
+func TestBuildGoMailMsgInline(t *testing.T) {
+	msg := sampleMsg()
+	msg.Inline = []email.Attachment{{Filename: "logo.png", ContentID: "logo", Data: []byte("img-bytes")}}
+	if _, err := buildGoMailMsg(msg); err != nil {
+		t.Fatalf("embedding inline image failed: %v", err)
+	}
+}
+
+func TestResendInlineImage(t *testing.T) {
+	var gotPayload resendPayload
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotPayload)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := NewResendWithEndpoint("re_test", srv.URL)
+	msg := sampleMsg()
+	msg.Inline = []email.Attachment{{Filename: "logo.png", ContentID: "logo", Data: []byte("\x89PNG")}}
+	if err := r.Send(context.Background(), msg); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range gotPayload.Attachments {
+		if a.ContentID == "logo" && a.Content != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("inline image not sent with content_id: %+v", gotPayload.Attachments)
+	}
+}

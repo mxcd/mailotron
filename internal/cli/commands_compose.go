@@ -93,6 +93,7 @@ func sendCommand() *cli.Command {
 			&cli.StringFlag{Name: "from", Usage: "override the account's From address"},
 			&cli.StringFlag{Name: "reply-to", Usage: "Reply-To address"},
 			&cli.StringSliceFlag{Name: "attach", Usage: "attach a file (repeatable)"},
+			&cli.StringSliceFlag{Name: "embed", Usage: "inline image cid=path, referenced as cid:<cid> (repeatable)"},
 			&cli.BoolFlag{Name: "dry-run", Usage: "render but do not send"},
 		),
 		Action: sendAction,
@@ -129,6 +130,10 @@ func sendAction(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	inline, err := parseEmbeds(cmd.StringSlice("embed"))
+	if err != nil {
+		return err
+	}
 
 	msg := &email.Message{
 		From:        firstNonEmpty(cmd.String("from"), acc.From),
@@ -140,6 +145,7 @@ func sendAction(ctx context.Context, cmd *cli.Command) error {
 		HTML:        out.HTML,
 		Text:        out.Text,
 		Attachments: atts,
+		Inline:      inline,
 	}
 
 	if cmd.Bool("dry-run") {

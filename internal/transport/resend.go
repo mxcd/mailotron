@@ -39,8 +39,9 @@ func NewResendWithEndpoint(apiKey, endpoint string) *Resend {
 }
 
 type resendAttachment struct {
-	Filename string `json:"filename"`
-	Content  string `json:"content"` // base64
+	Filename  string `json:"filename"`
+	Content   string `json:"content"` // base64
+	ContentID string `json:"content_id,omitempty"`
 }
 
 type resendPayload struct {
@@ -89,6 +90,17 @@ func (r *Resend) Send(ctx context.Context, msg *email.Message) error {
 		payload.Attachments = append(payload.Attachments, resendAttachment{
 			Filename: a.Filename,
 			Content:  base64.StdEncoding.EncodeToString(a.Data),
+		})
+	}
+	for _, a := range msg.Inline {
+		cid := a.ContentID
+		if cid == "" {
+			cid = a.Filename
+		}
+		payload.Attachments = append(payload.Attachments, resendAttachment{
+			Filename:  a.Filename,
+			Content:   base64.StdEncoding.EncodeToString(a.Data),
+			ContentID: cid,
 		})
 	}
 

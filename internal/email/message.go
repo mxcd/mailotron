@@ -8,10 +8,13 @@ type Address struct {
 	Address string `json:"address"`
 }
 
-// Attachment is a file attached to an outbound message.
+// Attachment is a file attached to an outbound message. When used as an inline
+// image (Message.Inline), ContentID is the value referenced from HTML as
+// `cid:<ContentID>`.
 type Attachment struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"contentType,omitempty"`
+	ContentID   string `json:"contentId,omitempty"`
 	Data        []byte `json:"-"`
 }
 
@@ -27,6 +30,7 @@ type Message struct {
 	HTML        string            `json:"-"`
 	Text        string            `json:"-"`
 	Attachments []Attachment      `json:"attachments,omitempty"`
+	Inline      []Attachment      `json:"inline,omitempty"` // inline images referenced as cid:<ContentID>
 	Headers     map[string]string `json:"headers,omitempty"`
 }
 

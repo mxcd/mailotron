@@ -98,7 +98,8 @@ Key `render`/`send` flags: `--template`, `--signature`, `--body`, `--body-file`
 `--preview`, `--align left|center` (left = normal flush-left mail; default left),
 `--var key=value` (repeatable), `--vars-file <json>`. `send` adds
 `--to`/`--cc`/`--bcc`/`--reply-to` (repeatable, RFC 5322 addresses),
-`--attach <path>` (repeatable), `--dry-run`.
+`--attach <path>` (repeatable), `--embed cid=path` (inline image referenced as
+`cid:<cid>` from a template/signature, repeatable), `--dry-run`.
 
 ## Templates & signatures
 

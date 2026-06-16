@@ -170,6 +170,37 @@ func readAttachments(paths []string) ([]email.Attachment, error) {
 	return out, nil
 }
 
+// parseEmbeds turns repeated cid=path values into inline image attachments
+// referenced from HTML as cid:<cid>.
+func parseEmbeds(pairs []string) ([]email.Attachment, error) {
+	var out []email.Attachment
+	for _, p := range pairs {
+		i := strings.IndexByte(p, '=')
+		if i < 0 {
+			return nil, usageErr("invalid --embed %q (want cid=path)", p)
+		}
+		cid, path := p[:i], p[i+1:]
+		if cid == "" || path == "" {
+			return nil, usageErr("invalid --embed %q (want cid=path)", p)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("embed %q: %w", path, err)
+		}
+		ct := mime.TypeByExtension(filepath.Ext(path))
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		out = append(out, email.Attachment{
+			Filename:    filepath.Base(path),
+			ContentType: ct,
+			ContentID:   cid,
+			Data:        data,
+		})
+	}
+	return out, nil
+}
+
 func parseUID(arg string) (uint32, error) {
 	if arg == "" {
 		return 0, usageErr("message UID argument required")

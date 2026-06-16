@@ -120,5 +120,15 @@ func buildGoMailMsg(msg *email.Message) (*mail.Msg, error) {
 			return nil, fmt.Errorf("attach %q: %w", name, err)
 		}
 	}
+	for _, a := range msg.Inline {
+		cid := a.ContentID
+		if cid == "" {
+			cid = a.Filename
+		}
+		data := a.Data
+		if err := m.EmbedReader(a.Filename, bytes.NewReader(data), mail.WithFileContentID(cid)); err != nil {
+			return nil, fmt.Errorf("embed %q: %w", cid, err)
+		}
+	}
 	return m, nil
 }

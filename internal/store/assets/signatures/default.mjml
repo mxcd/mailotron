@@ -1,0 +1,3 @@
+<mj-text font-size="14px" color="#4b5563" line-height="1.5">
+  <strong>{{.Name}}</strong>{{if .Role}}<br />{{.Role}}{{end}}{{if .Company}}<br />{{.Company}}{{end}}{{if .Phone}}<br />{{.Phone}}{{end}}{{if .Email}}<br /><a href="mailto:{{.Email}}" style="color:#2563eb;">{{.Email}}</a>{{end}}{{if .Website}}<br /><a href="{{.Website}}" style="color:#2563eb;">{{.Website}}</a>{{end}}
+</mj-text>

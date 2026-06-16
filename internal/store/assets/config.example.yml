@@ -1,0 +1,36 @@
+# mailotron configuration — ~/.mailotron/config.yml
+#
+# Secrets are referenced as ${ENV_VAR} and resolved from the environment at
+# load time; they are never written to disk by mailotron. Set them in your
+# shell, a .env loader, or your agent harness before running commands.
+
+defaults:
+  account: personal        # used by send/folder/message when --account is omitted
+  template: default        # default frame template (see `mailotron template list`)
+  signature: default       # default signature (see `mailotron signature list`)
+
+accounts:
+  # SMTP outbound + IMAP inbound account.
+  personal:
+    from: "Your Name <you@example.com>"
+    outbound:
+      type: smtp
+      host: smtp.example.com
+      port: 587
+      tls: starttls         # starttls (587) | tls (465) | none
+      username: you@example.com
+      password: ${SMTP_PASSWORD}
+    imap:
+      host: imap.example.com
+      port: 993
+      tls: tls              # tls (993) | starttls (143) | none
+      username: you@example.com
+      password: ${IMAP_PASSWORD}
+      # trash_folder: Trash  # folder that `message delete` moves to (default: Trash)
+
+  # Resend (send-only) account. Uncomment and set RESEND_API_KEY to use.
+  # newsletter:
+  #   from: "News <news@example.com>"
+  #   outbound:
+  #     type: resend
+  #     api_key: ${RESEND_API_KEY}

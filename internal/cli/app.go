@@ -19,7 +19,7 @@ const rootHint = "mailotron — email for AI agents.\n" +
 // New builds the root command. out/errw are the stdout/stderr writers (injected
 // for testability).
 func New(version string, out, errw io.Writer) *cli.Command {
-	return &cli.Command{
+	root := &cli.Command{
 		Name:      "mailotron",
 		Usage:     "compose, send and manage email — built for AI agents",
 		Version:   version,
@@ -43,6 +43,19 @@ func New(version string, out, errw io.Writer) *cli.Command {
 			fmt.Fprintln(cmd.Root().Writer, rootHint)
 			return nil
 		},
+	}
+	// Slice flags (--var, --to, --cc, --bcc, --attach) are repeatable; they must
+	// NOT comma-split their values, since an address display name or a variable
+	// value may legitimately contain a comma. This setting is read per-command,
+	// so apply it across the whole command tree.
+	disableSliceSplitting(root)
+	return root
+}
+
+func disableSliceSplitting(cmd *cli.Command) {
+	cmd.DisableSliceFlagSeparator = true
+	for _, sub := range cmd.Commands {
+		disableSliceSplitting(sub)
 	}
 }
 

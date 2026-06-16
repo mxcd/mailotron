@@ -115,6 +115,27 @@ func TestUsageErrorExitCode(t *testing.T) {
 	}
 }
 
+func TestSliceFlagValuesAreNotCommaSplit(t *testing.T) {
+	t.Setenv("MAILOTRON_CONFIG_DIR", t.TempDir())
+	frame := filepath.Join(t.TempDir(), "frame.mjml")
+	if err := os.WriteFile(frame, []byte(`<mjml><mj-body><mj-section><mj-column><mj-text>{{.Place}}</mj-text>{{.Body}}</mj-column></mj-section></mj-body></mjml>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := run(t, "-o", "json", "render",
+		"--template-file", frame, "--body", "hi", "--subject", "S",
+		"--var", "Place=Stuttgart, Germany")
+	if code != 0 {
+		t.Fatalf("render exit %d: %s", code, stderr)
+	}
+	var res struct{ HTML string }
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.HTML, "Stuttgart, Germany") {
+		t.Errorf("comma-containing var value was split; HTML lacks full value")
+	}
+}
+
 func TestSendRequiresRecipient(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("MAILOTRON_CONFIG_DIR", dir)

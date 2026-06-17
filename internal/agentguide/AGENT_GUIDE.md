@@ -149,6 +149,67 @@ A `message list`/`show` JSON object includes `uid`, `uidValidity`, `folder`,
 `html`, and `attachments`. Use `uid` + `folder` for follow-up operations. If a
 folder's `uidValidity` changes between calls, re-list before acting.
 
+## Backup & restore (whole mailbox)
+
+`backup` pulls an entire mailbox into a directory of plain files — one `.eml`
+per message (verbatim RFC822, fetched with PEEK so flags are untouched) plus a
+JSON index per folder and a top-level `manifest.json`. `restore` appends those
+messages back into IMAP. No archive/zip: the directory is meant to be handed to
+a content-addressed backup tool (restic, borg, `aws s3 sync`) which mailotron
+deliberately does **not** wrap — the directory is the contract between them.
+
+```sh
+# Pull the whole mailbox to ./backup (incremental: only new messages download):
+mailotron backup --out ./backup -a work -o json
+
+# Limit to specific folders:
+mailotron backup --out ./backup --folder INBOX --folder "Clients/Acme" -a work
+
+# Make the directory exactly mirror the live mailbox (prune deletions):
+mailotron backup --out ./backup --mirror -a work
+
+# Then archive to S3 with restic (mailotron does not do this for you):
+export RESTIC_PASSWORD=… AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=…
+restic -r s3:s3.amazonaws.com/your-bucket/mailbox backup ./backup
+
+# Restore everything back into IMAP (idempotent — skips messages already there):
+mailotron restore --in ./backup -a work -o json
+
+# Restore into a namespace instead of clobbering live folders, or preview first:
+mailotron restore --in ./backup --prefix "Restored/" -a work
+mailotron restore --in ./backup --dry-run -a work -o json
+```
+
+On-disk layout (stable paths → restic dedups; incremental snapshots are small):
+
+```
+backup/
+  manifest.json                 # account, server, time, folder list, counts
+  folders/
+    INBOX/
+      index.json                # uidvalidity, per-message {uid, messageId, flags, internalDate, size}
+      4213.eml                  # raw RFC822 bytes, named by IMAP UID
+    Clients%2FAcme/             # folder names percent-encoded to one path segment
+      …
+```
+
+Behavior worth knowing:
+
+- **Incremental.** Message bodies already on disk are never re-downloaded; only
+  flags/index are refreshed. Cheap to run repeatedly (e.g. before each restic run).
+- **Additive by default.** Messages deleted on the server stay in the backup.
+  Pass `--mirror` to prune them so each restic snapshot is an exact point-in-time
+  mirror. Pruning a vanished *folder* only happens on a full mirror (no `--folder`
+  filter); a scoped `--folder … --mirror` run leaves out-of-scope folders alone.
+- **UIDVALIDITY reset.** If a folder's `uidValidity` changes, the local folder is
+  re-fetched from scratch (old UIDs no longer identify the same messages). Prior
+  restic snapshots still hold the old state.
+- **Restore is idempotent.** Messages are matched by `Message-ID`; ones already
+  present in the target folder are skipped, so re-running never duplicates. APPEND
+  preserves flags and the original internal date (the server-managed `\Recent`
+  flag is dropped). Messages without a `Message-ID` cannot be deduplicated and
+  will be re-appended on a second run.
+
 ## Common agent workflows
 
 1. **Send a templated email**: `config validate` → pick `--account` →
@@ -158,6 +219,10 @@ folder's `uidValidity` changes between calls, re-list before acting.
    show <uid> --no-body` → `message move` / `message flag` / `message delete`.
 3. **Archive a thread**: `folder create Archive/2026` → `message move <uid>
    --to-folder Archive/2026`.
+4. **Back up a mailbox to S3**: `backup --out ./backup -a work` → hand `./backup`
+   to `restic backup`. Re-run both on a schedule; both are incremental.
+5. **Recover a mailbox**: `restore --in ./backup --prefix "Restored/" -a work`
+   (use `--dry-run` first to preview).
 
 ## Gotchas
 

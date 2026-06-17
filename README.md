@@ -15,6 +15,9 @@ command with flags, and every command speaks JSON.
   `~/.mailotron/config.yml`; pick one with `-a/--account`.
 - **Full IMAP management.** List/create/rename/delete folders; list, read,
   move, copy, flag, delete and download messages and attachments.
+- **Mailbox backup & restore.** Pull an entire mailbox into a directory of
+  individual files (one `.eml` per message, no archive) and append it back.
+  Incremental and restic-friendly, so an external backup tool can ship it to S3.
 
 ## Install
 
@@ -91,6 +94,33 @@ arbitrary `{{.Var}}` variables; signatures are MJML snippets. Both live under
 
 The body is Markdown by default; use `--body-format mjml|text|html` for other
 inputs.
+
+## Mailbox backup & restore
+
+`mailotron backup` mirrors a whole mailbox into a directory of plain files — one
+`.eml` per message (verbatim RFC822) plus a JSON index per folder and a
+top-level `manifest.json`. There is no zip: the directory is the contract with a
+content-addressed backup tool such as [restic](https://restic.net), which
+mailotron intentionally does **not** wrap. Because every message lands at a
+stable path with identical bytes across runs, restic deduplicates it and each
+incremental snapshot is tiny.
+
+```sh
+# Pull the mailbox (incremental — only new messages download):
+mailotron backup --out ./backup -a work
+
+# Ship it to S3 with restic (run separately; mailotron does not call restic):
+export RESTIC_PASSWORD=…  AWS_ACCESS_KEY_ID=…  AWS_SECRET_ACCESS_KEY=…
+restic -r s3:s3.amazonaws.com/your-bucket/mailbox backup ./backup
+
+# Recover, into a namespace so live folders are untouched (idempotent):
+mailotron restore --in ./backup --prefix "Restored/" -a work
+```
+
+Backups are **additive** by default (messages deleted on the server are kept);
+add `--mirror` to prune them so each restic snapshot is an exact point-in-time
+copy. Restore matches messages by `Message-ID` and skips ones already present,
+so it is safe to re-run.
 
 ## Development
 

@@ -38,6 +38,8 @@ func New(version string, out, errw io.Writer) *cli.Command {
 			sendCommand(),
 			folderCommand(),
 			messageCommand(),
+			backupCommand(),
+			restoreCommand(),
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			fmt.Fprintln(cmd.Root().Writer, rootHint)

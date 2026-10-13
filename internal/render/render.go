@@ -112,7 +112,7 @@ func Render(in Input) (*Output, error) {
 
 	// Plain text is the single source of truth derived from the rendered HTML,
 	// so the signature (and any frame content) appears exactly once.
-	text := htmlToText(html)
+	text := HTMLToText(html)
 
 	return &Output{HTML: html, Text: text, MJML: composed}, nil
 }

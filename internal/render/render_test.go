@@ -136,7 +136,7 @@ func TestHTMLToTextTableCells(t *testing.T) {
 	html := `<table>` +
 		`<tr><td>Mobil</td><td>0176 6368 3213</td></tr>` +
 		`<tr><td>E-Mail</td><td>a@b.com</td></tr></table>`
-	got := htmlToText(html)
+	got := HTMLToText(html)
 	if !strings.Contains(got, "Mobil 0176 6368 3213") {
 		t.Errorf("adjacent cells concatenated, got: %q", got)
 	}
@@ -175,5 +175,35 @@ func TestExtractVars(t *testing.T) {
 	user := UserVars(testFrame)
 	if len(user) != 1 || user[0] != "Name" {
 		t.Errorf("UserVars = %v, want [Name]", user)
+	}
+}
+
+func TestPreviewTextNotInPlainText(t *testing.T) {
+	out, err := Render(Input{
+		Frame:       testFrame,
+		Body:        "Sehr geehrte Frau Muster,\n\nanbei die Unterlagen.",
+		BodyFormat:  BodyMarkdown,
+		Subject:     "Unterlagen",
+		PreviewText: "Kurze Vorschau",
+		Vars:        map[string]any{"Name": "Max"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.HTML, "Kurze Vorschau") {
+		t.Fatal("preview must stay in the HTML for inbox previews")
+	}
+	if strings.Contains(out.Text, "Kurze Vorschau") {
+		t.Errorf("preview leaked into plain text:\n%s", out.Text)
+	}
+	if !strings.HasPrefix(out.Text, "Hi Max") {
+		t.Errorf("plain text should start with the visible content:\n%s", out.Text)
+	}
+}
+
+func TestHTMLToTextHiddenSubtree(t *testing.T) {
+	got := HTMLToText(`<div style="display: none"><div>hidden <b>deep</b></div><br><img src="x"></div><p>shown</p>`)
+	if got != "shown" {
+		t.Errorf("got %q", got)
 	}
 }

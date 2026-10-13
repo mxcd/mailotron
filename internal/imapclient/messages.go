@@ -282,12 +282,15 @@ func summaryFromBuf(b *imapclient.FetchMessageBuffer, folder string, uidValidity
 		s.Subject = b.Envelope.Subject
 		s.From = formatAddrs(b.Envelope.From)
 		s.To = formatAddrs(b.Envelope.To)
-		if !b.Envelope.Date.IsZero() {
-			s.Date = b.Envelope.Date.Format(displayTime)
-		}
+		s.Cc = formatAddrs(b.Envelope.Cc)
+		s.MessageID = b.Envelope.MessageID
+		s.when = b.Envelope.Date
 	}
-	if s.Date == "" && !b.InternalDate.IsZero() {
-		s.Date = b.InternalDate.Format(displayTime)
+	if s.when.IsZero() {
+		s.when = b.InternalDate
+	}
+	if !s.when.IsZero() {
+		s.Date = s.when.Local().Format(displayTime)
 	}
 	return s
 }

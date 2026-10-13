@@ -83,13 +83,23 @@ func (c *Client) FetchMeta(folder string, uids []uint32) ([]MessageMeta, error) 
 // fetched with PEEK so the \Seen flag is never altered. Messages are fetched in
 // bounded chunks to cap memory use on large folders.
 func (c *Client) FetchRaw(folder string, uids []uint32, fn func(uid uint32, data []byte) error) error {
+	return c.fetchBodies(folder, uids, &imap.FetchItemBodySection{Peek: true}, fn)
+}
+
+// FetchPrefix is FetchRaw limited to the first max bytes of each message.
+// Headers and text parts precede attachments in virtually every MIME message,
+// so this reads the searchable text without downloading large attachments.
+func (c *Client) FetchPrefix(folder string, uids []uint32, max int64, fn func(uid uint32, data []byte) error) error {
+	return c.fetchBodies(folder, uids, &imap.FetchItemBodySection{Peek: true, Partial: &imap.SectionPartial{Offset: 0, Size: max}}, fn)
+}
+
+func (c *Client) fetchBodies(folder string, uids []uint32, bs *imap.FetchItemBodySection, fn func(uid uint32, data []byte) error) error {
 	if len(uids) == 0 {
 		return nil
 	}
 	if _, err := c.c.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
 		return fmt.Errorf("select %q: %w", folder, err)
 	}
-	bs := &imap.FetchItemBodySection{Peek: true}
 	opts := &imap.FetchOptions{UID: true, BodySection: []*imap.FetchItemBodySection{bs}}
 	for _, chunk := range chunkUIDs(uids, fetchChunk) {
 		bufs, err := c.c.Fetch(imap.UIDSetNum(toIMAPUIDs(chunk)...), opts).Collect()
@@ -149,9 +159,9 @@ func (c *Client) EnsureFolder(name string) error {
 }
 
 // AppendMessage uploads a raw RFC822 message into a folder with the given flags
-// and internal date. The server-managed \Recent flag is dropped (APPEND must
-// not set it).
-func (c *Client) AppendMessage(folder string, data []byte, flags []string, internalDate time.Time) error {
+// and internal date and returns its new UID (0 when the server lacks UIDPLUS).
+// The server-managed \Recent flag is dropped (APPEND must not set it).
+func (c *Client) AppendMessage(folder string, data []byte, flags []string, internalDate time.Time) (uint32, error) {
 	opts := &imap.AppendOptions{Time: internalDate}
 	for _, f := range flags {
 		// \Recent is server-managed and must not be set by APPEND.
@@ -163,15 +173,20 @@ func (c *Client) AppendMessage(folder string, data []byte, flags []string, inter
 	cmd := c.c.Append(folder, int64(len(data)), opts)
 	if _, err := cmd.Write(data); err != nil {
 		_ = cmd.Close()
-		return fmt.Errorf("append to %q: %w", folder, err)
+		return 0, fmt.Errorf("append to %q: %w", folder, err)
 	}
 	if err := cmd.Close(); err != nil {
-		return fmt.Errorf("append to %q: %w", folder, err)
+		return 0, fmt.Errorf("append to %q: %w", folder, err)
 	}
-	if _, err := cmd.Wait(); err != nil {
-		return fmt.Errorf("append to %q: %w", folder, err)
+	res, err := cmd.Wait()
+	if err != nil {
+		return 0, fmt.Errorf("append to %q: %w", folder, err)
 	}
-	return nil
+	// The new UID is only reported by servers with UIDPLUS (or IMAP4rev2).
+	if res == nil {
+		return 0, nil
+	}
+	return uint32(res.UID), nil
 }
 
 func chunkUIDs(uids []uint32, size int) [][]uint32 {

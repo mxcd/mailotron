@@ -39,10 +39,8 @@ func composeInput(cmd *cli.Command, cfg *config.Config) (render.Input, error) {
 		}
 		in.Frame = string(b)
 	} else {
-		name := cmd.String("template")
-		if name == "" {
-			name = cfg.Defaults.Template
-		}
+		accTemplate, _ := accountDefaults(cmd, cfg)
+		name := firstNonEmpty(cmd.String("template"), firstNonEmpty(accTemplate, cfg.Defaults.Template))
 		if name == "" {
 			return in, usageErr("no template specified and no defaults.template set")
 		}
@@ -64,10 +62,11 @@ func composeInput(cmd *cli.Command, cfg *config.Config) (render.Input, error) {
 		}
 		in.Signature = string(b)
 	} else {
-		name := cmd.String("signature")
-		if name == "" {
-			name = cfg.Defaults.Signature
-		}
+		_, accSignature := accountDefaults(cmd, cfg)
+		// A signature named by flag or by the account is required to exist; only
+		// the global default may silently fall back to no signature.
+		required := cmd.IsSet("signature") || accSignature != ""
+		name := firstNonEmpty(cmd.String("signature"), firstNonEmpty(accSignature, cfg.Defaults.Signature))
 		if name != "" {
 			st, err := store.New()
 			if err != nil {
@@ -79,7 +78,7 @@ func composeInput(cmd *cli.Command, cfg *config.Config) (render.Input, error) {
 					return in, err
 				}
 				in.Signature = sig.MJML
-			} else if cmd.IsSet("signature") {
+			} else if required {
 				return in, fmt.Errorf("signature %q not found", name)
 			}
 		}
@@ -111,6 +110,16 @@ func composeInput(cmd *cli.Command, cfg *config.Config) (render.Input, error) {
 	}
 	in.Vars = vars
 	return in, nil
+}
+
+// accountDefaults returns the selected account's own template and signature
+// names, or empty strings when no account resolves (e.g. stateless render).
+func accountDefaults(cmd *cli.Command, cfg *config.Config) (template, signature string) {
+	acc, err := cfg.Resolve(cmd.String("account"))
+	if err != nil {
+		return "", ""
+	}
+	return acc.Template, acc.Signature
 }
 
 func readBody(cmd *cli.Command) (string, error) {

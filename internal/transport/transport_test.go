@@ -1,12 +1,15 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	stdmail "net/mail"
+	"strings"
 	"testing"
 
 	"github.com/mxcd/mailotron/internal/config"
@@ -115,9 +118,48 @@ func TestBuildGoMailMsg(t *testing.T) {
 	if m == nil {
 		t.Fatal("nil message")
 	}
-	// Missing recipients should error.
-	if _, err := buildGoMailMsg(&email.Message{From: "a@b.com", Subject: "x"}); err == nil {
-		t.Error("expected error with no recipients")
+	// Drafts may be unaddressed, so the encoder accepts no recipients...
+	if _, err := buildGoMailMsg(&email.Message{From: "a@b.com", Subject: "x"}); err != nil {
+		t.Errorf("unaddressed message should encode: %v", err)
+	}
+	// ...but SMTP delivery must refuse it.
+	s := NewSMTP(&config.Outbound{Type: config.OutboundSMTP, Host: "127.0.0.1", Port: 1})
+	if err := s.Send(context.Background(), &email.Message{From: "a@b.com", Subject: "x"}); err == nil {
+		t.Error("expected send error with no recipients")
+	}
+}
+
+func TestBuildMIME(t *testing.T) {
+	msg := sampleMsg()
+	msg.To = []string{"Matthias Würtenberger <mw@example.org>"}
+	msg.Headers = map[string]string{"In-Reply-To": "<parent@example.org>", "References": "<root@example.org> <parent@example.org>"}
+	raw, id, err := BuildMIME(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(id, "@example.com") {
+		t.Errorf("message-id not tied to sender domain: %q", id)
+	}
+	parsed, err := stdmail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("output is not a parseable RFC 5322 message: %v", err)
+	}
+	h := parsed.Header
+	if got := h.Get("Message-Id"); got != "<"+id+">" {
+		t.Errorf("Message-ID header = %q, want <%s>", got, id)
+	}
+	if h.Get("Date") == "" {
+		t.Error("Date header missing")
+	}
+	to, err := h.AddressList("To")
+	if err != nil || len(to) != 1 || to[0].Address != "mw@example.org" || to[0].Name != "Matthias Würtenberger" {
+		t.Errorf("non-ASCII display name did not round-trip: %v %v", to, err)
+	}
+	if h.Get("In-Reply-To") != "<parent@example.org>" || !strings.Contains(h.Get("References"), "<root@example.org>") {
+		t.Errorf("threading headers missing: %q / %q", h.Get("In-Reply-To"), h.Get("References"))
+	}
+	if h.Get("Cc") == "" {
+		t.Error("Cc header missing")
 	}
 }
 

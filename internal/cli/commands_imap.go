@@ -118,6 +118,7 @@ func listFilterFlags() []cli.Flag {
 		&cli.StringFlag{Name: "subject", Usage: "Subject contains"},
 		&cli.StringFlag{Name: "text", Usage: "full-text contains"},
 		&cli.IntFlag{Name: "limit", Value: 50, Usage: "max messages to return"},
+		&cli.BoolFlag{Name: "all-folders", Usage: "search every folder instead of --folder (newest --limit matches overall)"},
 	}
 }
 
@@ -196,7 +197,14 @@ func messageList(_ context.Context, cmd *cli.Command) error {
 		Text:    cmd.String("text"),
 		Limit:   int(cmd.Int("limit")),
 	}
-	msgs, err := c.ListMessages(folder, q)
+	all := cmd.Bool("all-folders")
+	var msgs []imapclient.MessageSummary
+	if all {
+		folder = "*"
+		msgs, err = c.SearchAll(q)
+	} else {
+		msgs, err = c.ListMessages(folder, q)
+	}
 	if err != nil {
 		return err
 	}
@@ -205,6 +213,10 @@ func messageList(_ context.Context, cmd *cli.Command) error {
 		state := "•"
 		if m.Seen {
 			state = " "
+		}
+		if all {
+			fmt.Fprintf(&b, "%s %-20s %7d  %-24s  %s\n", state, truncate(m.Folder, 20), m.UID, truncate(strings.Join(m.From, ","), 24), m.Subject)
+			continue
 		}
 		fmt.Fprintf(&b, "%s %7d  %-24s  %s\n", state, m.UID, truncate(strings.Join(m.From, ","), 24), m.Subject)
 	}
@@ -233,9 +245,14 @@ func messageShow(_ context.Context, cmd *cli.Command) error {
 		return p.emitJSON(detail)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "UID:     %d\nFrom:    %s\nTo:      %s\nDate:    %s\nSubject: %s\nFlags:   %s\n",
-		detail.UID, strings.Join(detail.From, ", "), strings.Join(detail.To, ", "),
-		detail.Date, detail.Subject, strings.Join(detail.Flags, " "))
+	fmt.Fprintf(&b, "UID:     %d\nFrom:    %s\nTo:      %s\n", detail.UID, strings.Join(detail.From, ", "), strings.Join(detail.To, ", "))
+	if len(detail.Cc) > 0 {
+		fmt.Fprintf(&b, "Cc:      %s\n", strings.Join(detail.Cc, ", "))
+	}
+	fmt.Fprintf(&b, "Date:    %s\nSubject: %s\nFlags:   %s\n", detail.Date, detail.Subject, strings.Join(detail.Flags, " "))
+	if detail.MessageID != "" {
+		fmt.Fprintf(&b, "Message-ID: <%s>\n", detail.MessageID)
+	}
 	for _, a := range detail.Attachments {
 		fmt.Fprintf(&b, "Attachment: %s (%s, %d bytes)\n", a.Filename, a.ContentType, a.Size)
 	}

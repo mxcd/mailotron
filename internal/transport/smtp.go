@@ -35,10 +35,14 @@ func (s *SMTP) client() (*mail.Client, error) {
 	}
 
 	if s.opts.Username != "" {
+		password, err := s.opts.ResolvePassword()
+		if err != nil {
+			return nil, fmt.Errorf("smtp: %w", err)
+		}
 		clientOpts = append(clientOpts,
 			mail.WithSMTPAuth(mail.SMTPAuthPlain),
 			mail.WithUsername(s.opts.Username),
-			mail.WithPassword(s.opts.Password),
+			mail.WithPassword(password),
 		)
 	}
 
@@ -59,6 +63,9 @@ func (s *SMTP) Verify(ctx context.Context) error {
 
 // Send builds a multipart/alternative message and delivers it.
 func (s *SMTP) Send(ctx context.Context, msg *email.Message) error {
+	if len(msg.To) == 0 {
+		return fmt.Errorf("message has no recipients")
+	}
 	m, err := buildGoMailMsg(msg)
 	if err != nil {
 		return err
@@ -78,11 +85,10 @@ func buildGoMailMsg(msg *email.Message) (*mail.Msg, error) {
 	if err := m.From(msg.From); err != nil {
 		return nil, fmt.Errorf("invalid from %q: %w", msg.From, err)
 	}
-	if len(msg.To) == 0 {
-		return nil, fmt.Errorf("message has no recipients")
-	}
-	if err := m.To(msg.To...); err != nil {
-		return nil, fmt.Errorf("invalid to: %w", err)
+	if len(msg.To) > 0 {
+		if err := m.To(msg.To...); err != nil {
+			return nil, fmt.Errorf("invalid to: %w", err)
+		}
 	}
 	if len(msg.Cc) > 0 {
 		if err := m.Cc(msg.Cc...); err != nil {

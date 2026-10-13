@@ -23,6 +23,7 @@ const (
 type Config struct {
 	Defaults Defaults            `yaml:"defaults"`
 	Accounts map[string]*Account `yaml:"accounts"`
+	Index    IndexConfig         `yaml:"index"`
 
 	// MissingEnv lists ${VAR} references in the config that were not set in the
 	// environment. Unset secrets are not a parse error (so secret-free commands
@@ -38,6 +39,25 @@ type Defaults struct {
 	Signature string `yaml:"signature"`
 }
 
+// IndexConfig configures the local search index (`mailotron index`).
+type IndexConfig struct {
+	// Embedding enables semantic search; without it the index is full-text only.
+	Embedding *Embedding `yaml:"embedding"`
+	// ExcludeFolders are never indexed. An entry matches a folder's full name or
+	// its last path segment, case-insensitively ("Trash" matches "INBOX.Trash").
+	ExcludeFolders []string `yaml:"exclude_folders"`
+}
+
+// Embedding points at an Ollama server that turns message text into vectors.
+// Mail text is sent to URL, so it should be a local or self-hosted server.
+type Embedding struct {
+	URL         string `yaml:"url"`          // default http://localhost:11434
+	Model       string `yaml:"model"`        // e.g. qwen3-embedding:0.6b
+	Dimensions  int    `yaml:"dimensions"`   // optional MRL truncation, 0 = model default
+	QueryPrefix string `yaml:"query_prefix"` // instruction prepended to queries (not documents)
+	Batch       int    `yaml:"batch"`        // texts per request, default 16
+}
+
 // Account bundles an identity with an outbound transport and optional inbound
 // IMAP access. An account without an IMAP block is send-only.
 type Account struct {
@@ -45,6 +65,12 @@ type Account struct {
 	From     string    `yaml:"from"`
 	Outbound *Outbound `yaml:"outbound"`
 	IMAP     *IMAP     `yaml:"imap"`
+
+	// Template and Signature override defaults.template/defaults.signature for
+	// messages composed from this account, so an account's own signature is
+	// applied without having to pass --signature every time.
+	Template  string `yaml:"template,omitempty"`
+	Signature string `yaml:"signature,omitempty"`
 }
 
 // Outbound describes how mail leaves the account.
@@ -52,11 +78,12 @@ type Outbound struct {
 	Type string `yaml:"type"` // smtp | resend
 
 	// SMTP fields
-	Host     string `yaml:"host,omitempty"`
-	Port     int    `yaml:"port,omitempty"`
-	TLS      string `yaml:"tls,omitempty"`
-	Username string `yaml:"username,omitempty"`
-	Password string `yaml:"password,omitempty"`
+	Host        string `yaml:"host,omitempty"`
+	Port        int    `yaml:"port,omitempty"`
+	TLS         string `yaml:"tls,omitempty"`
+	Username    string `yaml:"username,omitempty"`
+	Password    string `yaml:"password,omitempty"`
+	PasswordCmd string `yaml:"password_cmd,omitempty"` // shell command printing the password
 
 	// Resend fields
 	APIKey string `yaml:"api_key,omitempty"`
@@ -64,12 +91,14 @@ type Outbound struct {
 
 // IMAP describes inbound mailbox access.
 type IMAP struct {
-	Host        string `yaml:"host"`
-	Port        int    `yaml:"port"`
-	TLS         string `yaml:"tls,omitempty"`
-	Username    string `yaml:"username"`
-	Password    string `yaml:"password"`
-	TrashFolder string `yaml:"trash_folder,omitempty"`
+	Host         string `yaml:"host"`
+	Port         int    `yaml:"port"`
+	TLS          string `yaml:"tls,omitempty"`
+	Username     string `yaml:"username"`
+	Password     string `yaml:"password"`
+	PasswordCmd  string `yaml:"password_cmd,omitempty"` // shell command printing the password
+	TrashFolder  string `yaml:"trash_folder,omitempty"`
+	DraftsFolder string `yaml:"drafts_folder,omitempty"`
 }
 
 // TrashOrDefault returns the configured trash folder or the IMAP-standard
@@ -79,6 +108,15 @@ func (i *IMAP) TrashOrDefault() string {
 		return i.TrashFolder
 	}
 	return "Trash"
+}
+
+// DraftsOrDefault returns the configured drafts folder or the IMAP-standard
+// "Drafts" when unset.
+func (i *IMAP) DraftsOrDefault() string {
+	if i.DraftsFolder != "" {
+		return i.DraftsFolder
+	}
+	return "Drafts"
 }
 
 // AccountNames returns the configured account names, sorted for stable output.
@@ -144,6 +182,9 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+	if e := c.Index.Embedding; e != nil && e.Model == "" {
+		return fmt.Errorf("index.embedding.model is required")
+	}
 	if d := c.Defaults.Account; d != "" {
 		if _, ok := c.Accounts[d]; !ok {
 			return fmt.Errorf("defaults.account %q does not exist", d)
@@ -160,6 +201,9 @@ func (o *Outbound) validate(account string) error {
 		}
 		if !validTLS(o.TLS) {
 			return fmt.Errorf("account %q: invalid smtp tls mode %q", account, o.TLS)
+		}
+		if o.Password != "" && o.PasswordCmd != "" {
+			return fmt.Errorf("account %q: smtp password and password_cmd are mutually exclusive", account)
 		}
 	case OutboundResend:
 		// api_key may be injected from the environment at runtime; an empty key
@@ -181,6 +225,9 @@ func (i *IMAP) validate(account string) error {
 	}
 	if !validTLS(i.TLS) {
 		return fmt.Errorf("account %q: invalid imap tls mode %q", account, i.TLS)
+	}
+	if i.Password != "" && i.PasswordCmd != "" {
+		return fmt.Errorf("account %q: imap password and password_cmd are mutually exclusive", account)
 	}
 	return nil
 }

@@ -88,7 +88,7 @@ func RestoreRun(c *imapclient.Client, opts RestoreOptions) (*RestoreResult, erro
 				return nil, fmt.Errorf("read %q: %w", e.File, err)
 			}
 			when := parseDate(e.InternalDate)
-			if err := c.AppendMessage(target, data, e.Flags, when); err != nil {
+			if _, err := c.AppendMessage(target, data, e.Flags, when); err != nil {
 				return nil, err
 			}
 			if e.MessageID != "" {

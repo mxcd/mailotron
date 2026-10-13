@@ -13,8 +13,15 @@ command with flags, and every command speaks JSON.
   prompts, and a baked-in operating manual: `mailotron guide`.
 - **Multi-account.** Configure any number of mailboxes in
   `~/.mailotron/config.yml`; pick one with `-a/--account`.
+- **Drafts, never an accidental send.** `mailotron draft` renders exactly what
+  `send` would deliver and stores it in an IMAP folder with `\Draft`, ready to
+  review and send from any mail client. `--reply-uid` threads it under a parent.
 - **Full IMAP management.** List/create/rename/delete folders; list, read,
-  move, copy, flag, delete and download messages and attachments.
+  move, copy, flag, delete and download messages and attachments; search one
+  folder or all of them (`--all-folders`).
+- **Local search index.** `mailotron index sync` keeps an incremental SQLite
+  FTS5 index of a mailbox straight from IMAP; `mailotron index search` ranks
+  by words, by meaning (embeddings from a local Ollama) or both.
 - **Mailbox backup & restore.** Pull an entire mailbox into a directory of
   individual files (one `.eml` per message, no archive) and append it back.
   Incremental and restic-friendly, so an external backup tool can ship it to S3.
@@ -44,6 +51,10 @@ mailotron send -a personal \
   --var Name=Jane \
   --body $'# Hi Jane\n\nThis is **Markdown**, rendered into a responsive template.'
 
+# or store it as a draft instead of sending (reply threaded under UID 4213)
+mailotron draft -a personal --reply-uid 4213 --to jane@example.com \
+  --body $'Hi Jane,\n\nthanks, see below.'
+
 # triage an inbox
 mailotron message list -a personal --unseen -o json
 mailotron message show 4213 -a personal -o json
@@ -59,8 +70,10 @@ adds a machine-readable command catalog generated from the live command tree.
 ## Configuration
 
 `~/.mailotron/config.yml` holds any number of accounts. Secrets are referenced
-as `${ENV_VAR}` and resolved from the environment at load time — they are never
-written to disk by mailotron.
+as `${ENV_VAR}` and resolved from the environment at load time, or fetched by a
+`password_cmd` (a shell command printing the password, e.g. from the macOS
+Keychain or `pass`) that runs only when a connection is made. mailotron never
+writes secrets to disk.
 
 ```yaml
 defaults:
@@ -75,6 +88,15 @@ accounts:
                 username: you@example.com, password: ${SMTP_PASSWORD} }
     imap:     { host: imap.example.com, port: 993, tls: tls,
                 username: you@example.com, password: ${IMAP_PASSWORD} }
+
+  work:                             # password from the macOS Keychain
+    from: "Your Name <you@work.example>"
+    signature: work                 # this account's own signature (overrides defaults.signature)
+    outbound: { type: smtp, host: smtp.work.example, port: 465, tls: tls, username: you@work.example,
+                password_cmd: "security find-generic-password -a you@work.example -s mailotron-work -w" }
+    imap:     { host: imap.work.example, port: 993, tls: tls, username: you@work.example,
+                password_cmd: "security find-generic-password -a you@work.example -s mailotron-work -w",
+                drafts_folder: INBOX.Drafts }
 
   newsletter:                       # send-only via Resend (no imap block)
     from: "News <news@example.com>"

@@ -2,6 +2,8 @@
 // for folder and message management.
 package imapclient
 
+import "time"
+
 // Mailbox is an IMAP folder ("directory").
 type Mailbox struct {
 	Name       string   `json:"name"`
@@ -17,11 +19,18 @@ type MessageSummary struct {
 	Subject     string   `json:"subject"`
 	From        []string `json:"from,omitempty"`
 	To          []string `json:"to,omitempty"`
+	Cc          []string `json:"cc,omitempty"`
+	MessageID   string   `json:"messageId,omitempty"`
 	Date        string   `json:"date,omitempty"`
 	Flags       []string `json:"flags,omitempty"`
 	Size        int64    `json:"size"`
 	Seen        bool     `json:"seen"`
+
+	when time.Time // sort key for cross-folder search
 }
+
+// When is the message's Date header, or its INTERNALDATE when that is missing.
+func (s MessageSummary) When() time.Time { return s.when }
 
 // AttachmentInfo describes an attachment on a fetched message.
 type AttachmentInfo struct {

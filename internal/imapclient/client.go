@@ -39,7 +39,12 @@ func Connect(cfg *config.IMAP) (*Client, error) {
 		return nil, fmt.Errorf("imap dial %s: %w", addr, err)
 	}
 
-	if err := c.Login(cfg.Username, cfg.Password).Wait(); err != nil {
+	password, err := cfg.ResolvePassword()
+	if err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("imap: %w", err)
+	}
+	if err := c.Login(cfg.Username, password).Wait(); err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("imap login: %w", err)
 	}

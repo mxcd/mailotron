@@ -23,17 +23,32 @@ var skipTags = map[atom.Atom]bool{
 	atom.Style: true, atom.Script: true, atom.Head: true, atom.Title: true,
 }
 
+// voidTags never get an end tag, so they must not count towards the depth of
+// a hidden subtree.
+var voidTags = map[atom.Atom]bool{
+	atom.Area: true, atom.Base: true, atom.Br: true, atom.Col: true, atom.Embed: true,
+	atom.Hr: true, atom.Img: true, atom.Input: true, atom.Link: true, atom.Meta: true,
+	atom.Source: true, atom.Track: true, atom.Wbr: true,
+}
+
+// isHidden reports an inline display:none, which is how <mj-preview> emits the
+// inbox preview text; it must not leak into the start of the plain-text part.
+func isHidden(style string) bool {
+	return strings.Contains(strings.ReplaceAll(strings.ToLower(style), " ", ""), "display:none")
+}
+
 type linkFrame struct {
 	href string
 	pos  int
 }
 
-// htmlToText reduces rendered email HTML to readable plain text, preserving
+// HTMLToText reduces rendered email HTML to readable plain text, preserving
 // http(s) link targets as "text (url)" and dropping style/script/head noise.
-func htmlToText(input string) string {
+func HTMLToText(input string) string {
 	tok := html.NewTokenizer(strings.NewReader(input))
 	var b strings.Builder
 	skip := 0
+	hidden := 0 // open-element depth inside a display:none subtree
 	var links []linkFrame
 
 	for {
@@ -45,6 +60,28 @@ func htmlToText(input string) string {
 		case html.StartTagToken, html.SelfClosingTagToken:
 			name, hasAttr := tok.TagName()
 			a := atom.Lookup(name)
+			var href, style string
+			for hasAttr {
+				var k, v []byte
+				k, v, hasAttr = tok.TagAttr()
+				switch string(k) {
+				case "href":
+					href = string(v)
+				case "style":
+					style = string(v)
+				}
+			}
+			opens := tt == html.StartTagToken && !voidTags[a]
+			if hidden > 0 {
+				if opens {
+					hidden++
+				}
+				continue
+			}
+			if opens && isHidden(style) {
+				hidden = 1
+				continue
+			}
 			switch {
 			case skipTags[a]:
 				if tt == html.StartTagToken {
@@ -53,14 +90,6 @@ func htmlToText(input string) string {
 			case a == atom.Br:
 				b.WriteByte('\n')
 			case a == atom.A:
-				href := ""
-				for hasAttr {
-					var k, v []byte
-					k, v, hasAttr = tok.TagAttr()
-					if string(k) == "href" {
-						href = string(v)
-					}
-				}
 				if tt == html.StartTagToken {
 					links = append(links, linkFrame{href: href, pos: b.Len()})
 				}
@@ -72,6 +101,10 @@ func htmlToText(input string) string {
 		case html.EndTagToken:
 			name, _ := tok.TagName()
 			a := atom.Lookup(name)
+			if hidden > 0 {
+				hidden--
+				continue
+			}
 			switch {
 			case skipTags[a]:
 				if skip > 0 {
@@ -92,7 +125,7 @@ func htmlToText(input string) string {
 				b.WriteByte('\n')
 			}
 		case html.TextToken:
-			if skip == 0 {
+			if skip == 0 && hidden == 0 {
 				b.Write(tok.Text())
 			}
 		}

@@ -1,8 +1,9 @@
 # mailotron configuration — ~/.mailotron/config.yml
 #
 # Secrets are referenced as ${ENV_VAR} and resolved from the environment at
-# load time; they are never written to disk by mailotron. Set them in your
-# shell, a .env loader, or your agent harness before running commands.
+# load time, or fetched with password_cmd (a shell command printing the
+# password, run only when a connection is made). mailotron never writes
+# secrets to disk.
 
 defaults:
   account: personal        # used by send/folder/message when --account is omitted
@@ -26,7 +27,10 @@ accounts:
       tls: tls              # tls (993) | starttls (143) | none
       username: you@example.com
       password: ${IMAP_PASSWORD}
+      # password_cmd: "security find-generic-password -a you@example.com -s mailotron -w"  # instead of password
       # trash_folder: Trash  # folder that `message delete` moves to (default: Trash)
+      # drafts_folder: Drafts  # folder that `draft` stores into (default: Drafts)
+    # signature: work        # this account's own signature (overrides defaults.signature)
 
   # Resend (send-only) account. Uncomment and set RESEND_API_KEY to use.
   # newsletter:
@@ -34,3 +38,13 @@ accounts:
   #   outbound:
   #     type: resend
   #     api_key: ${RESEND_API_KEY}
+
+# Local search index (`mailotron index`). Full-text search works without this
+# block; with it, `index sync` also embeds messages for semantic search. Mail
+# text is sent to the URL, so use a local or self-hosted Ollama.
+# index:
+#   embedding:
+#     url: http://localhost:11434
+#     model: qwen3-embedding:0.6b
+#     # dimensions: 512      # optional MRL truncation
+#   exclude_folders: ["Deleted Messages", "Trash", "Junk", "Spam"]  # never indexed

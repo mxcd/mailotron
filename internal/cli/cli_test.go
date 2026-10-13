@@ -149,3 +149,45 @@ func TestSendRequiresRecipient(t *testing.T) {
 		t.Errorf("want exit 2 for missing --to, got %d", code)
 	}
 }
+
+// An account's own signature applies without --signature, and a missing one
+// is an error rather than a silently unsigned mail.
+func TestAccountSignatureApplied(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MAILOTRON_CONFIG_DIR", dir)
+	if _, _, code := run(t, "config", "init"); code != 0 {
+		t.Fatalf("config init exit %d", code)
+	}
+	sig := filepath.Join(t.TempDir(), "wit.mjml")
+	if err := os.WriteFile(sig, []byte("<mj-text>WIT-SIGNATURE-MARKER</mj-text>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := run(t, "signature", "add", "wit", "--file", sig); code != 0 {
+		t.Fatalf("signature add: %s", stderr)
+	}
+	cfg := `defaults: { account: wit, template: default, signature: default }
+accounts:
+  wit:
+    from: "Max <max@example.com>"
+    signature: wit
+    outbound: { type: smtp, host: localhost, port: 25 }
+  other:
+    from: "Other <o@example.com>"
+    signature: missing
+    outbound: { type: smtp, host: localhost, port: 25 }
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := run(t, "-o", "json", "render", "--subject", "x", "--body", "hello")
+	if code != 0 {
+		t.Fatalf("render exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "WIT-SIGNATURE-MARKER") {
+		t.Error("account signature not applied")
+	}
+	if _, _, code := run(t, "-a", "other", "render", "--subject", "x", "--body", "hello"); code == 0 {
+		t.Error("missing account signature must fail")
+	}
+}

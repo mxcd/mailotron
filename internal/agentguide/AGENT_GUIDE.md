@@ -14,6 +14,8 @@ every command with copy-pasteable examples.
   account has an identity (`from`), an outbound transport (`smtp` or `resend`),
   and an optional inbound `imap` mailbox. Multiple accounts may be configured;
   select one with `--account <name>`, otherwise `defaults.account` is used.
+  An account may set its own `template:`/`signature:`; they win over
+  `defaults.*`, so its signature is applied without passing `--signature`.
 - **Template** — an MJML "frame" (the outer shell of the email) stored under
   `~/.mailotron/templates/<name>.mjml`. You never write raw HTML; templates are
   MJML and are compiled to responsive HTML.
@@ -56,6 +58,10 @@ renderer always provides `Subject`, `PreviewText`, `Year`, `Date`, `Body`, and
 - Config secrets are referenced as `${ENV_VAR}` in the YAML and resolved from
   the environment at load time. Set e.g. `SMTP_PASSWORD`, `IMAP_PASSWORD`,
   `RESEND_API_KEY` before running.
+- Alternatively an `outbound`/`imap` block sets `password_cmd`, a shell command
+  whose stdout is the password (e.g. `security find-generic-password -a <user>
+  -s <service> -w`). It runs only when a connection is made; you never need to
+  see or pass the secret.
 - `MAILOTRON_CONFIG` overrides the config file path; `MAILOTRON_CONFIG_DIR`
   overrides the whole config/store directory.
 
@@ -101,6 +107,37 @@ Key `render`/`send` flags: `--template`, `--signature`, `--body`, `--body-file`
 `--attach <path>` (repeatable), `--embed cid=path` (inline image referenced as
 `cid:<cid>` from a template/signature, repeatable), `--dry-run`.
 
+## Drafts (store instead of send)
+
+`draft` renders exactly like `send` (template, signature, `--embed`, `--attach`,
+Cc/Bcc) but stores the message in an IMAP folder with the `\Draft` and `\Seen`
+flags instead of delivering it. A human reviews and sends it from their mail
+client. `draft` never sends.
+
+```sh
+# Draft into the account's imap.drafts_folder (default "Drafts"):
+mailotron draft -a work --to "Jane <jane@example.com>" --subject "Q2 report" \
+  --body-file ./body.md -o json
+
+# Any folder, spaces included (quoting is handled for you):
+mailotron draft -a qvm --folder "INBOX.03 Entwuerfe Betty" --to a@b.com \
+  --subject "Einladung" --embed qvm-logo=./logo.png --body-file ./body.md
+
+# Reply to UID 4213 in INBOX: sets In-Reply-To/References, subject "Re: <parent>":
+mailotron draft -a work --reply-uid 4213 --to jane@example.com --body "Thanks!"
+mailotron draft -a work --reply-uid 77 --reply-folder "Clients/Acme" --to jane@example.com --body "..."
+```
+
+JSON result: `drafted`, `account`, `folder`, `uid` (0 if the server lacks
+UIDPLUS), `messageId`, `subject`, `to`, `cc`, `attachments`, `inReplyTo`.
+Recipients are optional for a draft; the parent's `\Seen` flag is untouched.
+A `--reply-uid` draft quotes the parent below the reply like Thunderbird
+(`On dd.MM.yy HH:mm, <author> wrote:` + `<blockquote type="cite">`, `> ` lines in
+the text part); `--no-quote` skips it. Inline `cid:` images of the parent are not
+carried over.
+To replace a draft, create the new one first, verify it, then `message delete
+<old-uid> --folder <drafts> --hard`.
+
 ## Templates & signatures
 
 ```sh
@@ -142,12 +179,53 @@ mailotron message download 4213 --out ./dl --attachments-only -a work
 
 # Search (server-side IMAP SEARCH):
 mailotron message search --folder INBOX --text "invoice" --since 2026-01-01 -a work -o json
+
+# Search every folder at once (newest --limit matches overall, each with its folder):
+mailotron message search --all-folders --from jane@example.com --limit 20 -a work -o json
 ```
 
 A `message list`/`show` JSON object includes `uid`, `uidValidity`, `folder`,
-`from`, `to`, `subject`, `date`, `flags`, `size`, and (for `show`) `text`,
+`from`, `to`, `cc`, `messageId`, `subject`, `date`, `flags`, `size`, and (for `show`) `text`,
 `html`, and `attachments`. Use `uid` + `folder` for follow-up operations. If a
 folder's `uidValidity` changes between calls, re-list before acting.
+
+## Local search index (full-text + semantic)
+
+`index` keeps a per-account SQLite index (`~/.mailotron/index/<account>.db`,
+owner-only) of every message's subject, addresses and text, synced directly
+from IMAP. No backup is needed. Attachments and raw messages are not stored.
+
+```sh
+mailotron index sync -a work              # first run indexes everything, later runs only changes
+mailotron index search -a work "angebot valumedia" -o json
+mailotron index search -a work --mode fts "rechnung*" --since 2026-01-01 --folder INBOX
+mailotron index search -a work --mode semantic "wer wollte den quellcode haben"
+mailotron index search -a work --raw 'subject:angebot NOT entwurf'
+mailotron index status -a work
+```
+
+- **Incremental.** Per folder the server's UIDs are compared with the indexed
+  ones: only new messages are fetched (PEEK, flags untouched) and parsed,
+  vanished ones are dropped, flags refreshed; a changed UIDVALIDITY re-indexes
+  that folder. Every message commits on its own, so an interrupted sync resumes.
+- **Embeddings (optional).** With `index.embedding` configured (an Ollama
+  `url` and `model`, optional `dimensions`, `query_prefix`, `batch`), `sync`
+  also embeds new messages, again incrementally; a model or dimension change
+  re-embeds everything. `--no-embed` skips it. Mail text is sent to that URL,
+  so keep it local or self-hosted. qwen3-embedding models get their query
+  instruction automatically.
+- **Excluded folders.** `index.exclude_folders` (e.g. `["Deleted Messages",
+  "Trash", "Junk", "Spam"]`) matches a folder's full name or its last path
+  segment, case-insensitively. Excluded folders are skipped and anything
+  already indexed from them is dropped on the next sync.
+- **Modes.** `fts` = BM25 word match (every word must occur, `word*` = prefix,
+  umlauts folded, addresses safe). `semantic` = nearest by meaning. `hybrid`
+  (default when embeddings exist) fuses both by rank. Semantic and hybrid
+  always return up to `--limit` results, nearest first; use `--mode fts` when
+  you need only real word matches.
+- A hit carries `folder` + `uid` for `message show`/`move`/`draft --reply-uid`,
+  plus `subject`, `from`, `date`, `snippet` (matches in `**bold**`) and `score`
+  (higher is better within one search).
 
 ## Backup & restore (whole mailbox)
 
@@ -212,16 +290,21 @@ Behavior worth knowing:
 
 ## Common agent workflows
 
-1. **Send a templated email**: `config validate` → pick `--account` →
+1. **Draft a reply for a human to send**: `message list --unseen -o json` →
+   `message show <uid>` → `draft --reply-uid <uid> --to <sender> --body-file -`
+   → verify with `message show <draft-uid> --folder <drafts>`.
+2. **Find an old conversation**: `index sync` → `index search "<what you
+   remember>" -o json` → `message show <uid> --folder <folder>`.
+3. **Send a templated email**: `config validate` → pick `--account` →
    `template show <t> --vars` to learn required vars → `send` with `--var`s and
    `--body-file -`.
-2. **Triage an inbox**: `message list --unseen -o json` → for each, `message
+4. **Triage an inbox**: `message list --unseen -o json` → for each, `message
    show <uid> --no-body` → `message move` / `message flag` / `message delete`.
-3. **Archive a thread**: `folder create Archive/2026` → `message move <uid>
+5. **Archive a thread**: `folder create Archive/2026` → `message move <uid>
    --to-folder Archive/2026`.
-4. **Back up a mailbox to S3**: `backup --out ./backup -a work` → hand `./backup`
+6. **Back up a mailbox to S3**: `backup --out ./backup -a work` → hand `./backup`
    to `restic backup`. Re-run both on a schedule; both are incremental.
-5. **Recover a mailbox**: `restore --in ./backup --prefix "Restored/" -a work`
+7. **Recover a mailbox**: `restore --in ./backup --prefix "Restored/" -a work`
    (use `--dry-run` first to preview).
 
 ## Gotchas

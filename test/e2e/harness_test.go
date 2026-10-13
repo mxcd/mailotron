@@ -11,8 +11,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +32,8 @@ var (
 	pitHost string
 	pitSMTP string
 	pitHTTP string // host:port for Mailpit HTTP API
+
+	embedURL string // fake Ollama /api/embed for index tests
 )
 
 const (
@@ -83,6 +87,10 @@ func TestMain(m *testing.M) {
 	pitSMTP = psmtp.Port()
 	pitHTTP = fmt.Sprintf("%s:%s", pitHost, phttp.Port())
 
+	embedSrv := httptest.NewServer(http.HandlerFunc(fakeEmbed))
+	defer embedSrv.Close()
+	embedURL = embedSrv.URL
+
 	dir, _ := os.MkdirTemp("", "mailotron-e2e")
 	os.Setenv("MAILOTRON_CONFIG_DIR", dir)
 	if err := writeConfig(dir); err != nil {
@@ -110,7 +118,10 @@ func startContainer(ctx context.Context, req testcontainers.ContainerRequest) (t
 }
 
 func writeConfig(dir string) error {
-	cfg := fmt.Sprintf(`defaults:
+	cfg := fmt.Sprintf(`index:
+  embedding: { url: %q, model: fake-embed, batch: 4 }
+  exclude_folders: ["E2E Excluded"]
+defaults:
   account: green
   template: default
   signature: default
@@ -122,8 +133,13 @@ accounts:
   pit:
     from: "Agent <%s>"
     outbound: { type: smtp, host: %s, port: %s, tls: none }
-`, imapUser, gmHost, gmSMTP, gmHost, gmIMAP, imapLogin, imapPass,
-		imapUser, pitHost, pitSMTP)
+  greencmd:
+    from: "Agent <%s>"
+    outbound: { type: smtp, host: %s, port: %s, tls: none }
+    imap: { host: %s, port: %s, tls: none, username: %s, password_cmd: "printf '%%s\\n' %s", drafts_folder: "Entwuerfe Agent" }
+`, embedURL, imapUser, gmHost, gmSMTP, gmHost, gmIMAP, imapLogin, imapPass,
+		imapUser, pitHost, pitSMTP,
+		imapUser, gmHost, gmSMTP, gmHost, gmIMAP, imapLogin, imapPass)
 	return os.WriteFile(filepath.Join(dir, "config.yml"), []byte(cfg), 0o600)
 }
 
@@ -196,4 +212,25 @@ func mailpitFindSubject(t *testing.T, subject string) bool {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return false
+}
+
+// fakeEmbed stands in for Ollama: a 3-dim vector per text, one dimension per
+// topic keyword, so semantic search is deterministic.
+func fakeEmbed(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Input []string `json:"input"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	out := make([][]float32, 0, len(req.Input))
+	for _, in := range req.Input {
+		l := strings.ToLower(in)
+		v := []float32{0.01, 0.01, 0.01}
+		for i, kw := range []string{"aquarium", "rechnung", "urlaub"} {
+			if strings.Contains(l, kw) {
+				v[i] = 1
+			}
+		}
+		out = append(out, v)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": out})
 }

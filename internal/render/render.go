@@ -10,6 +10,7 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -18,8 +19,9 @@ import (
 )
 
 // Email block alignment. MJML always centers the fixed-width body column;
-// AlignLeft neutralizes that so the email sits flush-left like a normal,
-// hand-written mail (the column max-width is unchanged, only its position).
+// AlignLeft neutralizes that so the email sits flush-left and flows to the
+// window width like a normal, hand-written mail. AlignCenter keeps the fixed
+// column (newsletters).
 const (
 	AlignLeft   = "left"
 	AlignCenter = "center"
@@ -117,11 +119,26 @@ func Render(in Input) (*Output, error) {
 	return &Output{HTML: html, Text: text, MJML: composed}, nil
 }
 
-// flushLeft neutralizes MJML's auto-centering of the fixed-width body column so
-// the email sits flush against the left edge like a normal mail. It only touches
-// the body wrapper's centering margin — content alignment (e.g. a centered logo)
-// is preserved.
+// bodyWidthRe finds the mj-body width on MJML's centered section wrapper.
+var bodyWidthRe = regexp.MustCompile(`margin:0(?:px)? auto;max-width:(\d+)px;`)
+
+// msoColumnRe matches the fixed column cell inside MJML's Outlook-only tables.
+var msoColumnRe = regexp.MustCompile(`(<td class="[^"]*" style="vertical-align:top;)width:\d+px;(" >)`)
+
+// flushLeft makes the email behave like a normal, hand-written mail: flush
+// against the left edge and as wide as the reading pane. MJML centers a
+// fixed-width body column (centering margin and max-width on each section
+// wrapper, fixed-width Outlook tables); all of it is neutralized. Content
+// alignment (e.g. a centered logo) is preserved.
+// ponytail: assumes one mj-column per section (normal mail); multi-column
+// sections would stack in Outlook desktop.
 func flushLeft(html string) string {
+	if m := bodyWidthRe.FindStringSubmatch(html); m != nil {
+		w := m[1]
+		html = strings.ReplaceAll(html, `style="width:`+w+`px;" width="`+w+`"`, `style="width:100%;" width="100%"`)
+		html = bodyWidthRe.ReplaceAllString(html, "margin:0;max-width:none;")
+		html = msoColumnRe.ReplaceAllString(html, "${1}width:100%;${2}")
+	}
 	html = strings.ReplaceAll(html, "margin:0px auto", "margin:0")
 	html = strings.ReplaceAll(html, "margin:0 auto", "margin:0")
 	return html

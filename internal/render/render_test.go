@@ -130,6 +130,17 @@ func TestRenderAlignLeft(t *testing.T) {
 	if strings.Contains(left.HTML, "margin:0px auto") {
 		t.Errorf("align=left should neutralize the body auto-margin")
 	}
+	for _, fixed := range []string{"max-width:600px", `width="600"`, "width:600px"} {
+		if strings.Contains(left.HTML, fixed) {
+			t.Errorf("align=left should flow to the window width, still has %q", fixed)
+		}
+	}
+	if !strings.Contains(left.HTML, "vertical-align:top;width:100%") {
+		t.Errorf("align=left should make the Outlook column cell fluid")
+	}
+	if !strings.Contains(center.HTML, "max-width:600px") {
+		t.Errorf("align=center should keep the fixed body width")
+	}
 }
 
 func TestHTMLToTextTableCells(t *testing.T) {
